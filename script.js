@@ -16,52 +16,6 @@ function createReactiveVariable(name, initialValue, onChangeCallback) {
 const canvas = document.getElementById('canvas')
 const ctx = canvas.getContext('2d')
 
-const exampleCircuit = {
-    wires: [
-        [
-            { x: 2, y: 1 },
-            { x: 2, y: -1 }
-        ],
-        [
-            { x: 2, y: 1 },
-            { x: 2, y: 0 },
-            { x: 4, y: 0 },
-            { x: 4, y: 4 },
-            { x: 3, y: 4 },
-            { x: 3, y: 3 }
-        ],
-        [
-            { x: 0, y: 3 },
-            { x: 0, y: 2 },
-            { x: 2, y: 2 },
-            { x: 2, y: 1 }
-        ],
-        [
-            { x: 3, y: 3 },
-            { x: 3, y: 2 },
-            { x: 2, y: 2 },
-            { x: 2, y: 1 }
-        ]
-    ],
-    inputWires: [
-        [
-            { x: 0, y: 3 },
-            { x: 0, y: 5 }
-        ],
-        [
-            { x: 0, y: 3 },
-            { x: 0, y: 4 },
-            { x: 2, y: 4 },
-            { x: 2, y: 5 }
-        ]
-    ],
-    components: [
-        { type: 'nand', inputs: [1, 2], x: 2, y: 1, output: true },
-        { type: 'and', inputs: [-1, -2], x: 0, y: 3 },
-        { type: 'not', inputs: [0, 0], x: 3, y: 3 }
-    ],
-}
-
 function addInput(input) {
     const wrapper = document.createElement('div')
     wrapper.classList.add('input')
@@ -185,8 +139,6 @@ let autoSave = localStorage.getItem('autoSave') == 'true'
 
 let componentToPlace
 
-let tickOnce = false
-
 let closestWireConnection
 let firstWireConnection
 let wireGridDensity = 1
@@ -195,15 +147,68 @@ let showWireGrid = false
 
 let IOToPlace
 
-createReactiveVariable('mode', 'blank', modeChange)
-
-const renderTime = 250
+let showingSim
 
 let unit, charWidth
 
-function render() {
+function getRenderPointOfPoint(point, scale = 1) {
+    if (point.type == 'input')
+        return { x: (point.x + (point.index + 1) * (1 / (point.numberOfConnections + 1))) * scale, y: (point.y + 1) * scale }
+    if (point.type == 'output')
+        return { x: (point.x + .5) * scale, y: point.y * scale }
+    return { x: point.x * scale, y: point.y * scale }
+}
+
+function renderWire(wire, color) {
+    ctx.fillStyle = ctx.strokeStyle = color
+    ctx.lineJoin = 'round'
+    ctx.lineWidth = unit / 20
+    const path = wire.map(point => getRenderPointOfPoint(point, unit))
+    path.forEach(point => {
+        ctx.beginPath()
+        ctx.arc(point.x, point.y, ctx.lineWidth, 0, Math.PI * 2)
+        ctx.fill()
+    })
+    ctx.beginPath()
+    path.forEach(point => ctx.lineTo(point.x, point.y))
+    ctx.stroke()
+}
+
+function getCrossingWires(targetPoint) {
+    const out = []
+    for (const wire of currentCircuit.wires) {
+        for (let index = 0; index < wire.length - 1; index++) {
+            const pointA = getRenderPointOfPoint(wire[index])
+            const pointB = getRenderPointOfPoint(wire[index + 1])
+            if ((pointA.x == pointB.x && pointA.x == targetPoint.x && Math.max(pointA.y, pointB.y) >= targetPoint.y && Math.min(pointA.y, pointB.y) <= targetPoint.y) || (pointA.y == pointB.y && pointA.y == targetPoint.y && Math.max(pointA.x, pointB.x) >= targetPoint.x && Math.min(pointA.x, pointB.x) <= targetPoint.x)) {
+                const distanceA = Math.abs(pointA.x - targetPoint.x) + Math.abs(pointA.y - targetPoint.y)
+                const distanceB = Math.abs(pointB.x - targetPoint.x) + Math.abs(pointB.y - targetPoint.y)
+                if (distanceA < distanceB) out.push({ closePoint: pointA, farPoint: pointB, wire })
+                else out.push({ closePoint: pointB, farPoint: pointA, wire })
+            }
+        }
+    }
+    return out
+}
+
+createReactiveVariable('mode', 'blank', modeChange)
+
+let renderDelay = 250
+
+function render(isLive, solvedBits, inputs) {
+    isLive = isLive === true //otherwise it gets send the time for some reason?
+
+    if (isLive) {
+        this.solvedBits = solvedBits
+        this.inputs = inputs
+    } else if (showingSim) {
+        solvedBits = this.solvedBits
+        inputs = this.inputs
+    }
 
     //size the canvas
+    canvas.width = canvas.height = 0
+
     const wrapperStyles = window.getComputedStyle(document.getElementById('canvasWrapper'))
 
     unit = Math.min(parseFloat(wrapperStyles.width) / circuitWidth, parseFloat(wrapperStyles.height) / circuitHeight)
@@ -214,11 +219,11 @@ function render() {
     charWidth = ctx.measureText('0').width / unit
 
     //background layer
-    ctx.fillStyle = '#333'
+    ctx.fillStyle = colorKey.background
     ctx.fillRect(0, 0, unit * circuitWidth, unit * circuitHeight)
 
     if (showGrid) {
-        ctx.fillStyle = '#454545'
+        ctx.fillStyle = colorKey.background_bright
         for (let x = 0; x < circuitWidth; x++)
             for (let y = 0; y < circuitHeight; y++)
                 if ((x + y) % 2)
@@ -226,50 +231,21 @@ function render() {
     }
 
     //main layer
-    function renderLines() {
-        ctx.lineJoin = 'round'
-        ctx.lineWidth = unit / 20
-        currentCircuit.wires.forEach(wire => {
-            if (mode == 'routingWire' && grabbedPoint != undefined && wire.includes(grabbedPoint))
-                ctx.strokeStyle = '#66f6'
-            else
-                ctx.strokeStyle = '#6666'
-
-            ctx.fillStyle = ctx.strokeStyle
-            const path = []
-            wire.forEach(point => {
-                if (point.type == undefined)
-                    path.push({ x: point.x * unit, y: point.y * unit })
-                else if (point.type == 'output')
-                    path.push({ x: (point.x + .5) * unit, y: point.y * unit })
-                else {
-                    path.push({ x: (point.x + (point.index + 1) * (1 / (point.numberOfConnections + 1))) * unit, y: (point.y + 1) * unit })
-                }
-
-            })
-            path.forEach(point => {
-                ctx.beginPath()
-                ctx.arc(point.x, point.y, ctx.lineWidth, 0, Math.PI * 2)
-                ctx.fill()
-            })
-            ctx.beginPath()
-            path.forEach(point => ctx.lineTo(point.x, point.y))
-            ctx.stroke()
-        })
-    }
-
-    if (mode != 'routingWire') renderLines()
+    if (showingSim)
+        currentCircuit.wires.forEach(wire => renderWire(wire, colorKey[{ 'U': 'wire', '0': 'wire_off', '1': 'wire_on' }[solvedBits[currentCircuit.components.map((component, index) => ({ x: component.x, y: component.y, index })).filter(component => component.x == wire[0].x && component.y == wire[0].y)[0].index]]]))
+    else
+        currentCircuit.wires.forEach(wire => renderWire(wire, colorKey.wire))
 
     ctx.textBaseline = 'middle'
     ctx.textAlign = 'center'
 
     currentCircuit.components.forEach(component => {
-        ctx.fillStyle = '#000'
+        ctx.fillStyle = colorKey.component
         ctx.fillRect(component.x * unit, component.y * unit, unit, unit)
         ctx.font = `${unit / charWidth / String(component.type).length * .75}px Fira Code`
-        ctx.fillStyle = '#fff'
+        ctx.fillStyle = colorKey.component_text
         ctx.fillText(component.type.toUpperCase(), (component.x + .5) * unit, (component.y + .5) * unit)
-        ctx.fillStyle = '#fff'
+        ctx.fillStyle = colorKey.component_connection
         if (component.type == 'input') {
             const x = component.x + .5
             const y = component.y
@@ -312,7 +288,7 @@ function render() {
     })
 
     if (mode == 'addingWire' && firstWireConnection != undefined) {
-        ctx.fillStyle = '#00f'
+        ctx.fillStyle = colorKey.component_connection_connect
         ctx.beginPath()
         if (firstWireConnection.type == 'output') {
             const lineSize = 1 / 8
@@ -329,24 +305,32 @@ function render() {
         ctx.fill()
     }
 
-    if (mode == 'routingWire') renderLines()
-
     //overlay layer
+    if (showWireGrid) {
+        ctx.fillStyle = colorKey.wire_grid_point
+        for (let x = 0; x < circuitWidth * wireGridDensity; x++)
+            for (let y = 0; y < circuitHeight * wireGridDensity; y++) {
+                ctx.beginPath()
+                ctx.arc((Math.floor(x / wireGridDensity) + (x % wireGridDensity + 1) * (1 / (wireGridDensity + 1))) * unit, (Math.floor(y / wireGridDensity) + (y % wireGridDensity + 1) * (1 / (wireGridDensity + 1))) * unit, unit / wireGridDensity / 8, 0, Math.PI * 2)
+                ctx.fill()
+            }
+    }
+
     if (mode == 'placingComponent' && !currentCircuit.components.some(component => component.x == closestPoint.x && component.y == closestPoint.y)) {
-        ctx.fillStyle = '#0006'
+        ctx.fillStyle = colorKey.component_preview
         ctx.fillRect(closestPoint.x * unit, closestPoint.y * unit, unit, unit)
         ctx.font = `${unit / charWidth / String(componentToPlace).length * .75}px Fira Code`
-        ctx.fillStyle = '#fff6'
+        ctx.fillStyle = colorKey.component_text_preview
         ctx.fillText(componentToPlace.toUpperCase(), (closestPoint.x + .5) * unit, (closestPoint.y + .5) * unit)
     }
 
     else if (mode == 'removingComponent' && currentCircuit.components.some(component => component.x == closestPoint.x && component.y == closestPoint.y)) {
-        ctx.fillStyle = '#f006'
+        ctx.fillStyle = colorKey.component_remove
         ctx.fillRect(closestPoint.x * unit, closestPoint.y * unit, unit, unit)
     }
 
     else if (mode == 'addingWire' && closestWireConnection != undefined) {
-        ctx.fillStyle = '#00f'
+        ctx.fillStyle = colorKey.component_connection_connect_preview
         ctx.beginPath()
         if (closestWireConnection.type == 'output') {
             const lineSize = 1 / 8
@@ -364,17 +348,22 @@ function render() {
     }
 
     else if (mode == 'routingWire') {
-        if (showWireGrid) {
-            ctx.fillStyle = '#f006'
-            for (let x = 0; x < circuitWidth * wireGridDensity; x++)
-                for (let y = 0; y < circuitHeight * wireGridDensity; y++) {
-                    ctx.beginPath()
-                    ctx.arc((Math.floor(x / wireGridDensity) + (x % wireGridDensity + 1) * (1 / (wireGridDensity + 1))) * unit, (Math.floor(y / wireGridDensity) + (y % wireGridDensity + 1) * (1 / (wireGridDensity + 1))) * unit, unit / wireGridDensity / 8, 0, Math.PI * 2)
-                    ctx.fill()
-                }
-        }
-        if (grabbedPoint != undefined) {
-            ctx.fillStyle = '#00f'
+
+        if (grabbedPoint == undefined) {
+            const crossingWires = getCrossingWires({ x: closestPoint.subX, y: closestPoint.subY })
+            if (crossingWires.length > 0) {
+                const wire = crossingWires[0].wire
+                renderWire(wire, colorKey.wire_route_preview)
+                ctx.fillStyle = colorKey.wire_route_point_preview
+                ctx.beginPath()
+                ctx.arc(closestPoint.subX * unit, closestPoint.subY * unit, unit / 20, 0, Math.PI * 2)
+                ctx.fill()
+            }
+        } else {
+            for (const wire of currentCircuit.wires)
+                if (wire.includes(grabbedPoint))
+                    renderWire(wire, colorKey.wire_route)
+            ctx.fillStyle = colorKey.wire_route_point
             ctx.beginPath()
             ctx.arc(grabbedPoint.x * unit, grabbedPoint.y * unit, unit / 20, 0, Math.PI * 2)
             ctx.fill()
@@ -386,7 +375,7 @@ function render() {
         ctx.lineWidth = unit / 20
         for (const wire of currentCircuit.wires) {
             if (wire.some(point => point.x == closestPoint.subX && point.y == closestPoint.subY)) {
-                ctx.strokeStyle = '#f006'
+                ctx.strokeStyle = colorKey.wire_remove
                 ctx.fillStyle = ctx.strokeStyle
                 const path = []
                 wire.forEach(point => {
@@ -413,10 +402,10 @@ function render() {
     }
 
     else if (mode == 'placingIO' && !currentCircuit.components.some(component => component.x == closestPoint.x && component.y == closestPoint.y)) {
-        ctx.fillStyle = '#0006'
+        ctx.fillStyle = colorKey.component_preview
         ctx.fillRect(closestPoint.x * unit, closestPoint.y * unit, unit, unit)
         ctx.font = `${unit / charWidth / String(IOToPlace).length * .75}px Fira Code`
-        ctx.fillStyle = '#fff6'
+        ctx.fillStyle = colorKey.component_text_preview
         ctx.fillText(IOToPlace.toUpperCase(), (closestPoint.x + .5) * unit, (closestPoint.y + .5) * unit)
     }
 
@@ -645,7 +634,7 @@ addInput({
 }) //circuit size
 
 addInput({
-    title: 'Simulation speed',
+    title: 'Simulation',
     rows: [
         {
             title: mode == 'running' ? 'Running' : 'Paused',
@@ -658,17 +647,24 @@ addInput({
                     }
                 },
                 {
-                    type: 'button', title: 'tick', func() {
-                        tickOnce = true
-                    }
-                },
-                {
                     type: 'button', title: 'play', func(wrapper, row) {
                         mode = 'running'
+                        showingSim = true
                         row.parentNode.children[0].innerText = 'Running'
+                        solveAllCircuitInputs(currentCircuit, 3, true)
                     }
                 }
             ]
+        },
+        {
+            title: 'Delay (ms)',
+            items: [1000, 500, 250, 100, 0].map(time => ({
+                type: 'button',
+                title: time,
+                func() {
+                    renderDelay = time
+                }
+            }))
         }
     ]
 }) //sim speed
@@ -825,9 +821,21 @@ async function solveCircuit(circuit, inputs, doRender) {
     if (circuit == undefined) throw new Error('unknown circuit')
     const solvedBits = new Array(circuit.components.length).fill('U')
 
+    let nextInputIndex = 0
+    for (const index in circuit.components)
+        if (circuit.components[index].type == 'input') {
+            solvedBits[index] = inputs[nextInputIndex]
+            for (const component of circuit.components)
+                if (component.type != 'input')
+                    for (const inputIndex in component.inputs)
+                        if (component.inputs[inputIndex] == index)
+                            component.inputs[inputIndex] = nextInputIndex
+            nextInputIndex++
+        }
+
     if (doRender) {
-        renderCircuit({ ...circuit, solvedBits, inputs })
-        await new Promise(r => setTimeout(r, renderTime))
+        render(true, solvedBits)
+        await new Promise(r => setTimeout(r, renderDelay))
     }
 
     let output = 'U' //if all components output U then this will be the return value
@@ -836,6 +844,7 @@ async function solveCircuit(circuit, inputs, doRender) {
         let hasChanged = false
         for (let componentIndex = 0; componentIndex < circuit.components.length; componentIndex++) {
             const component = circuit.components[componentIndex]
+            if (component.type == 'input' || component.type == 'output') continue
             const oldValue = solvedBits[componentIndex]
             const rawInputs = component.inputs.map(input => {
                 if (input < 0) return inputs[Math.abs(input + 1)]
@@ -851,8 +860,8 @@ async function solveCircuit(circuit, inputs, doRender) {
                 if (component.output)
                     output = solvedBits[componentIndex]
                 if (doRender) {
-                    renderCircuit({ ...circuit, solvedBits, inputs })
-                    await new Promise(r => setTimeout(r, renderTime))
+                    render(true, solvedBits)
+                    await new Promise(r => setTimeout(r, renderDelay))
                 }
             }
         }
@@ -881,16 +890,15 @@ canvas.addEventListener('mousemove', event => {
     if (mode == 'addingWire' && currentCircuit.components.some(component => component.x == closestPoint.x && component.y == closestPoint.y)) {
         const componentType = currentCircuit.components.filter(component => component.x == closestPoint.x && component.y == closestPoint.y)[0].type
         if (componentType == 'input') {
-            closestWireConnection = { type: 'output', index: 1, component: componentType, x: closestPoint.x, y: closestPoint.y, numberOfConnections: 1 }
+            closestWireConnection = { type: 'output', index: 0, component: componentType, x: closestPoint.x, y: closestPoint.y, numberOfConnections: 1 }
         } else if (componentType == 'output') {
-            closestWireConnection = { type: 'input', index: 1, component: componentType, x: closestPoint.x, y: closestPoint.y, numberOfConnections: 1 }
+            closestWireConnection = { type: 'input', index: 0, component: componentType, x: closestPoint.x, y: closestPoint.y, numberOfConnections: 1 }
         } else {
             const numberOfInputs = components[componentType].numberOfInputs
             const connection = [{ type: 'output', x: closestPoint.x + .5, y: closestPoint.y }, ...(new Array(numberOfInputs).fill(0).map((v, index) => ({ type: 'input', index, x: closestPoint.x + (index + 1) * (1 / (numberOfInputs + 1)), y: closestPoint.y + 1 })))].map(p => ({ ...p, distance: Math.sqrt((p.x - mouse.x / unit) ** 2 + (p.y - mouse.y / unit) ** 2) })).sort((a, b) => a.distance - b.distance)[0]
             closestWireConnection = { type: connection.type, index: connection.index, component: componentType, x: closestPoint.x, y: closestPoint.y, numberOfConnections: connection.type == 'output' ? 1 : numberOfInputs }
         }
     }
-
 
     //sub x / y are snapped to wire grid points instead of regular grid points
     const WGDPlus1 = wireGridDensity + 1
@@ -907,6 +915,8 @@ canvas.addEventListener('mousemove', event => {
             closestPoint.subY = Number((Math.floor((mouse.y + unitByWGDPlus1By2) / unit * WGDPlus1 - 1 / WGDPlus1 * 2)) / WGDPlus1)
         else
             closestPoint.subY = Number((Math.floor((mouse.y + unitByWGDPlus1By2) / unit * WGDPlus1 + 1 / WGDPlus1 * 2)) / WGDPlus1)
+    closestPoint.subX = Number(closestPoint.subX.toFixed(5))
+    closestPoint.subY = Number(closestPoint.subY.toFixed(5))
 
     if (mode == 'routingWire' && grabbedPoint != undefined) {
         grabbedPoint.x = closestPoint.subX
@@ -1028,7 +1038,7 @@ canvas.addEventListener('click', () => {
                 let y = point.y
                 if (point.type == 'input') {
                     y++
-                    x = component.x + (point.index + 1) * (1 / (point.numberOfConnections + 1))
+                    x = point.x + (point.index + 1) * (1 / (point.numberOfConnections + 1))
                 }
                 return { ...point, x, y }
             }
@@ -1088,6 +1098,7 @@ render()
 
 const readableModes = {
     'running': 'Running',
+    'ticking': 'Ticking',
     'blank': 'Blank',
     'placingComponent': 'Placing component',
     'removingComponent': 'Removing component',
@@ -1102,4 +1113,5 @@ function modeChange(oldValue, newValue) {
     showModeElement.children[1].children[0].children[0].innerText = readableModes[mode]
 
     if (oldValue == 'routingWire') grabbedPoint = undefined
+    if (oldValue == 'running') showingSim = false
 }

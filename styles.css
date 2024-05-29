@@ -43,6 +43,16 @@ body {
     align-items: center;
 }
 
+@media (max-aspect-ratio: 1/1) {
+    body {
+        flex-direction: column;
+    }
+
+    #inputs {
+        flex-direction: row;
+    }
+}
+
 
 .input {
     margin: 10px;
