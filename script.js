@@ -874,6 +874,7 @@ async function solveAllCircuitInputs(circuit, numberOfInputs, doRender) {
     for (let index = 0; index < 3 ** numberOfInputs; index++) {
         const inputs = new Array(numberOfInputs).fill(0).map((v, inputIndex) => ['U', '0', '1'][Math.floor(index / (3 ** inputIndex)) % 3])
         solutions[inputs.join('-')] = await solveCircuit(circuit, inputs, doRender)
+        await new Promise(r => document.addEventListener('keypress', r))
     }
     return solutions
 }
