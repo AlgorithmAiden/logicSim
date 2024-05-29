@@ -1,0 +1,135 @@
+html,
+body {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+    font-family: "Fira Code";
+}
+
+body {
+    display: flex;
+    flex-direction: row;
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100vh;
+}
+
+#canvasWrapper {
+    display: flex;
+    flex-grow: 1;
+    flex-shrink: 1;
+    flex-basis: auto;
+    justify-content: center;
+    align-items: center;
+    border: 10px solid #666;
+    background-color: #151515;
+}
+
+#inputs {
+    border: 10px solid #666;
+    padding: 10px;
+    background-color: #151515;
+    display: flex;
+    flex-grow: 0;
+    flex-shrink: 0;
+    flex-basis: auto;
+    flex-direction: column;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-content: center;
+    align-items: center;
+}
+
+
+.input {
+    margin: 10px;
+    border: 3px solid #666;
+    background-color: #333;
+    display: flex;
+    flex-direction: column;
+}
+
+.input_title {
+    text-align: center;
+    color: #fff;
+    background-color: #666;
+    border-bottom: inherit;
+}
+
+.input_dropdown {
+    height: 0;
+    overflow: hidden;
+}
+
+.input:hover .input_dropdown {
+    height: fit-content
+}
+
+.input_rowWrapper {
+    background-color: #151515;
+    display: flex;
+    flex-direction: column;
+}
+
+.input_row {
+    background-color: #333;
+    border-radius: 5px;
+    display: flex;
+    flex-direction: column;
+    margin: 10px;
+}
+
+.input_row_title {
+    text-align: center;
+    color: #fff;
+}
+
+.input_row_itemWrapper {
+    display: flex;
+    flex-direction: row;
+    margin: 5px;
+    justify-content: center;
+}
+
+.input_row_item {
+    border-radius: 0;
+    padding: 2.5px;
+    margin: 2.5px;
+    text-align: center;
+    background-color: #666;
+    color: #fff;
+    border: 1px solid transparent;
+    transition: all .25s ease-in-out;
+}
+
+.input_row_item:hover {
+    background-color: #030;
+    color: #0f0;
+    border: 1px solid #0f0;
+}
+
+.input_row_item_left {
+    border-radius: 5px 0 0 5px;
+}
+
+.input_row_item_right {
+    border-radius: 0 5px 5px 0;
+}
+
+.input_row_item_left.input_row_item_right {
+    border-radius: 5px;
+}
+
+button,
+textarea {
+    all: unset;
+    display: inline-block;
+    cursor: pointer;
+}
+
+textarea {
+    overflow-wrap: break-word;
+}
